@@ -3,6 +3,10 @@ using server for deep-learning model execution
 
 
 # How to Execute Redis
+Redis 접속 시 사용
+cd ..
+cd .. 
+cd Users\User\Desktop\Redis-x64-3.0.504
 1. cmd를 관리자 명령으로 실행
 2. Redis 설치 파일로 이동하기 (다운로드 폴더면 다운로드 폴더 등)
 3. redis-server.exe --service-install redis.windows.conf --loglevel verbose 명령어로 redis server 실행
