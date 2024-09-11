@@ -10,3 +10,6 @@ using server for deep-learning model execution
 4. net start Redis 로 Redis Server 접속
 5. redis-cli ping -> "Pong"으로 답변 올 시 접속 완료
    
+# How to login in this program
+export USER_NAME=user1 # 각자마다 고유의 user_name을 통해 QUEUE가 겹치지 않도록 설정함.
+python producer.py
