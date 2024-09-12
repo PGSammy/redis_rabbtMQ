@@ -1,12 +1,15 @@
 import pika
 import json
+import pika.exceptions
 import redis
 import subprocess
 import os
 import time
 import re
 from config import RABBITMQ_HOST, RABBITMQ_QUEUE, REDIS_HOST, REDIS_PORT, REDIS_DB
+import sys
 import logging
+import zlib
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +45,15 @@ def get_available_gpu(r):
             gpu_id = available_gpus.pop(0)
             r.set('available_gpus', json.dumps(available_gpus))
             return gpu_id
-        time.sleep(1)
+        else:
+            print("No available GPU, waiting...")
+            time.sleep(0.5)
 
 def release_gpu(r: redis.Redis, gpu_id: int):
     available_gpus = json.loads(r.get('available_gpus') or '[]')
     available_gpus.append(gpu_id)
     r.set('available_gpus', json.dumps(available_gpus))
+    print(f"GPU {gpu_id} released.")
 
 def run_job(job, r):
     gpu_id = get_available_gpu(r)
@@ -71,19 +77,21 @@ def run_job(job, r):
         process.wait()
 
         if process.returncode == 0:
-            logger.info(f"Job completed successfully for user{job['user']}")
+            logger.info(f"\nJob completed successfully for user{job['user']}")
             return True
         else:
-            logger.error(f"Job failed for user {job['user']}")
+            logger.error(f"\nJob failed for user {job['user']}")
             return False
     except Exception as e:
-        logger.error(f"Error during job execution: {str(e)}")
+        logger.error(f"\nError during job execution: {str(e)}")
         return False
     finally:
         release_gpu(r, gpu_id)
+        print(f"GPU {gpu_id} Returned\n")
 
 def process_output(line, job_key, r):
-    print(line, end='')  # 실시간 출력
+    # 실시간 출력
+    print(line.strip())
 
     # 에폭 결과 파싱
     epoch_pattern = r"(Additional )?Epoch (\d+)/(\d+)"
@@ -101,6 +109,8 @@ def process_output(line, job_key, r):
     class_metric_match = re.search(class_metric_pattern, line)
     val_class_loss_match = re.search(val_class_loss_pattern, line)
     val_class_metric_match = re.search(val_class_metric_pattern, line)
+
+    pipe = r.pipeline()
 
     if epoch_match:
         is_additional = epoch_match.group(1) is not None
@@ -133,34 +143,24 @@ def process_output(line, job_key, r):
     if val_class_metric_match:
         r.hset(job_key, f"epoch_{current_epoch}_val_class_metric", val_class_metric_match.group(1))
 
-    if loss_match and val_match:
-        current_epoch = r.hget(job_key, "current_epoch").decode()
-        total_epochs = r.hget(job_key, "total_epochs").decode()
-        is_additional = r.hget(job_key, "is_additional_training").decode() == "1"
-        epoch_type = "Additional " if is_additional else ""
-        logger.info(f"{epoch_type}Epoch {current_epoch}/{total_epochs} completed. "
-                    f"Train Loss: {train_loss:.4f}, Train Metric: {train_metric:.4f}, "
-                    f"Val Loss: {val_loss:.4f}, Val Metric: {val_metric:.4f}")
+    pipe.execute()
 
-def parse_output(output, job):
-    try:
-        lines = output.strip().split('\n')
-        csv_path = lines[-2].strip()
-        accuracy = float(lines[-1].split(':')[-1].strip())
-        return {
-            'csv_path': csv_path,
-            'accuracy': accuracy,
-            'model': job['model'],
-            'dataset': job['dataset'],
-            'batch_size': job['batch_size'],
-            'epochs': job['epochs']
-        }
-    except (IndexError, ValueError) as e:
-        logger.error(f"Error parsing output: {e}")
-        return None
+    if loss_match and val_match:
+        epoch_type = "Additional " if is_additional else ""
+        print(f"\n{epoch_type}Epoch {current_epoch}/{total_epochs} 완료:")
+        print(f"  Train Loss: {train_loss:.4f}, Train Metric: {train_metric:.4f}")
+        print(f"  Val Loss: {val_loss:.4f}, Val Metric: {val_metric:.4f}")
+        if class_loss_match and class_metric_match and val_class_loss_match and val_class_metric_match:
+            print(f"  Train Class Losses: {class_loss_match.group(1)}")
+            print(f"  Train Class Metric: {class_metric_match.group(1)}")
+            print(f"  Val Class Losses: {val_class_loss_match.group(1)}")
+            print(f"  Val Class Metric: {val_class_metric_match.group(1)}")
+        print()
 
 def callback(ch, method, properties, body):
-    job = json.loads(body)
+    decompressed_message = zlib.decompress(body)
+    job = json.loads(decompressed_message.decode())
+    
     logger.info(f"Received job: {job}")
 
     result = run_job(job, r)
@@ -183,14 +183,41 @@ def callback(ch, method, properties, body):
 
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
-if __name__ == "__main__":
+def process_batch(messages):
+    for message in messages:
+        print(f"Processing message: {message}")
+
+def main():
     try:
-        connection, channel = connect_to_rabbitmq()
-        channel.basic_consume(queue=RABBITMQ_QUEUE, on_message_callback=callback)
-        logger.info('Waiting for jobs. To exit press CTRL+C')
+        connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+        channel = connection.channel()
+
+        # Queue
+        channel.queue_declare(queue='Executed')
+
+        batch_size = 10
+        batch = []
+
+        def callback(ch, method, properties, body):
+            nonlocal batch
+            batch.append(body)
+            if len(batch) >= batch_size:
+                process_batch(batch)
+                batch = []
+                ch.basic_ack(delivery_tag=method.delivery_tag, multiple=True)
+
+        channel.basic_qos(prefetch_count=batch_size)
+        channel.basic_consume(queue='Executed', on_message_callback=callback, auto_ack=True)
+
+        print(' [*] Waiting for messages. To exit press CTRL+C')
         channel.start_consuming()
-    except pika.exceptions.AMQPConnectionError:
-        logger.error("Failed to connect to RabbitMQ after multiple attempts. Exiting.")
-    finally:
-        if 'connection' in locals() and connection.is_open:
-            connection.close()
+
+    except pika.exceptions.AMQPConnectionError as e:
+        logger.error(f"RabbitMQ 연결 실패: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("Consumer 종료")
+        sys.exit(0)
+
+if __name__ == "__main__":
+    main()

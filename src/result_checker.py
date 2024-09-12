@@ -8,10 +8,18 @@ def get_result(model):
     result = r.get(f"result:{model}")
     if result:
         return json.loads(result)
-    return None
+    else:
+        return None
+
+def get_result_name(name):
+    result = r.get(f"result:{name}")
+    if result:
+        return json.loads(result)
+    else:
+        return None
 
 if __name__ == "__main__":
-    model = 'resnet50'
+    model = 'eff4'
     result = get_result(model)
     if result:
         print(f"Result for {model}: {result}")

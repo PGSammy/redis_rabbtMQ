@@ -1,10 +1,13 @@
 import pika
 import json
 import argparse
+import pika.exceptions
 import yaml
 import time
 from config import RABBITMQ_HOST, RABBITMQ_QUEUE, USER_NAME
+import sys
 import logging
+import zlib
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +60,16 @@ def submit_job(channel, job_data):
     logger.info(f"Submitted job: {job_data}")
 
 # main
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Submit a training job to the queue')
     parser.add_argument('--config_path', type=str, required=True, help='Path to the YAML config file')
     parser.add_argument('--script_path', type=str, required=True, help='Path to the training script')
     args = parser.parse_args()
-    
+
     try:
+        connection, channel = connect_to_rabbitmq()
+
         config = get_config(args.config_path)
-        # 정보 추출
         model_name, learning_rate = extract_info(config)
 
         job = {
@@ -75,11 +79,24 @@ if __name__ == "__main__":
             'learning_rate': learning_rate
         }
 
-        connection, channel = connect_to_rabbitmq()
+        compressed_message = zlib.compress(json.dumps(job).encode())
+
+        channel.basic_publish(
+            exchange='',
+            routing_key=RABBITMQ_QUEUE,
+            body=compressed_message,
+            properties=pika.BasicProperties(delivery_mode=2)
+        )
+
         submit_job(channel, job)
         logger.info(f"Job submitted to queue by user {USER_NAME}")
     except pika.exceptions.AMQPConnectionError:
         logger.error("Failed to connect to RabbitMQ after multiple attempts. Exiting.")
+        sys.exit(1)
     finally:
         if 'connection' in locals() and connection.is_open:
             connection.close()
+
+
+if __name__ == "__main__":
+    main()    

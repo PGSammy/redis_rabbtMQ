@@ -44,3 +44,28 @@ rabbitmqctl delete_vhost test_vhost
 2. To start rabbitmqctl / rabbitmq
 - rabbitmqctl start_app -> rabbitmqctl status
 - net start rabbitmq, net stop rabbitmq
+
+3. 방화벽 차단 (Firewall issue)
+- Windows Defender 방화벽 검색 후 실행
+- 고급 설정 클릭
+- 인바운드 규칙 클릭
+- RabbitMQ 관련 규칙 찾기
+- 규칙이 있다면 상태가 사용인지 확인
+- 규칙이 없다면 새 규칙 버튼을 클릭 -> 포트 선택 -> TCP와 특정 로컬 5672 입력 -> 연결 허용 -> 프로필 선택 -> 이름 지정 후 저장
+- cmd에서 확인 -> netsh advfirewall firewall show rule name=all | findstr /i "5672"
+
+해결 방안:
+프로파일링:
+cProfile이나 line_profiler를 사용하여 코드의 어느 부분에서 가장 많은 시간이 소요되는지 확인하세요.
+로깅 최적화:
+로깅 레벨을 조정하거나, 일부 로그를 배치로 처리하여 I/O 작업을 줄이세요.
+메시지 크기 최적화:
+필요한 정보만 메시지에 포함시키고, 가능하다면 파일 경로만 전송하여 실제 파일은 로컬에서 읽도록 수정하세요.
+Redis 사용 최적화:
+Redis 연산을 최소화하고, 가능하다면 일괄 처리하세요.
+GPU 할당 방식 개선:
+GPU 할당을 더 효율적으로 관리할 수 있는 방법을 고려해보세요.
+직접 실행과 비교:
+동일한 환경에서 train.py를 직접 실행한 경우와 RabbitMQ를 통해 실행한 경우의 시간을 비교하여 차이가 나는 지점을 파악하세요.
+모니터링 도구 사용:
+RabbitMQ의 관리 인터페이스나 모니터링 도구를 사용하여 메시지 처리 상태를 확인하세요.
