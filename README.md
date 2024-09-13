@@ -20,7 +20,7 @@ python producer.py
 
 # To use producer.py
 python producer.py --config_path path/to/your/config.yaml --script_path path/to/your/train.py
---> python producer.py --config_path C:\Users\User\Desktop\AIBoostcamp\Project\configs\default.yaml --script_path C:\Users\User\Desktop\AIBoostcamp\Project\scripts\train.py
+--> python producer.py --config_path C:\Users\User\Desktop\AIBoostcamp\Project\configs\default.yaml --script_path C:\Users\User\Desktop\AIBoostcamp\Project\src\data\augmentation.py --data_path C:\Users\User\Desktop\AIBoostcamp\Project\data --aug_path C:\Users\User\Desktop\AIBoostcamp\Project\src
 
 # Error Log
 1. not matching erlang cookie

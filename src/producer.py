@@ -64,6 +64,8 @@ def main():
     parser = argparse.ArgumentParser(description='Submit a training job to the queue')
     parser.add_argument('--config_path', type=str, required=True, help='Path to the YAML config file')
     parser.add_argument('--script_path', type=str, required=True, help='Path to the training script')
+    parser.add_argument('--data_path', type=str, required=True, help='Path to the data directory')
+    parser.add_argument('--aug_path', type=str, required=True, help='Path to the aug directory')
     args = parser.parse_args()
 
     try:
@@ -75,6 +77,9 @@ def main():
         job = {
             'user': USER_NAME,
             'script_path': args.script_path,
+            'config_path': args.config_path,
+            'data_path': args.data_path,
+            'aug_path': args.aug_path,
             'model_name': model_name,
             'learning_rate': learning_rate
         }
@@ -88,7 +93,7 @@ def main():
             properties=pika.BasicProperties(delivery_mode=2)
         )
 
-        submit_job(channel, job)
+        # submit_job(channel, job)
         logger.info(f"Job submitted to queue by user {USER_NAME}")
     except pika.exceptions.AMQPConnectionError:
         logger.error("Failed to connect to RabbitMQ after multiple attempts. Exiting.")

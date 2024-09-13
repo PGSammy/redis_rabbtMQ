@@ -1,0 +1,50 @@
+data:
+  augmented_dir: ./data/augmented
+  augmented_info_file: ./data/augmented.csv
+  data_dir: imagenet_sketch
+  test_dir: ./data/test
+  test_info_file: C:\Users\User\Desktop\AIBoostcamp\Project\data\test.csv
+  train_dir: ./data/train
+  train_info_file: C:\Users\User\Desktop\AIBoostcamp\Project\data\train.csv
+model:
+  name: eff4
+  num_classes: 1000
+  pretrained: true
+offline_augmentation:
+  augmentation:
+    crop: 1
+    flip: 1
+  ratio: 2
+paths:
+  log_dir: ./outputs/logs
+  output_dir: ./tests
+  save_dir: ./outputs/saved_models
+random_seed: 20010316
+training:
+  additional_epochs: 5
+  additional_train: true
+  augmentation:
+    flip: 0.0
+  batch_size: 32
+  criterion: CrossEntropyLoss
+  device: cuda
+  early_stopping:
+    evidence: loss
+    min_delta: 0.001
+    monitor: metric
+    patience: 5
+  learning_rate: 0.001
+  lr_scheduler:
+    factor: 0.1
+    min_lr: 1e-6
+    monitor: metric
+    name: ReduceLROnPlateau
+    patience: 3
+  metric: accuracy
+  mode: train
+  n_splits: 5
+  num_epochs: 50
+  optimizer:
+    name: Adam
+    weight_decay: 0.0001
+  validation_ratio: 0.2

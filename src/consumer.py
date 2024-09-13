@@ -10,8 +10,10 @@ import logging
 import zlib
 import torch
 import signal
-from config import RABBITMQ_HOST, RABBITMQ_QUEUE, REDIS_HOST, REDIS_PORT, REDIS_DB
-
+import sys
+import yaml
+import tempfile
+from config import RABBITMQ_HOST, RABBITMQ_QUEUE, REDIS_HOST, REDIS_PORT, REDIS_DB, AUGMENTATION_QUEUE
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -54,7 +56,6 @@ def initialize_gpu_list(r):
     r.set('available_gpus', json.dumps(available_gpus))
     print(f"Initialized available GPUs: {available_gpus}")
 
-
 # gpu 가능한거 백그라운드로 찾기
 def get_available_gpu(r):
     max_attempts = 10
@@ -77,21 +78,102 @@ def release_gpu(r: redis.Redis, gpu_id: int):
     r.set('available_gpus', json.dumps(available_gpus))
     print(f"GPU {gpu_id} released.")
 
-def run_job(job, r):
+def run_job(job, r, channel):
     gpu_id = get_available_gpu(r)
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    env = os.environ.copy()
+    env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    env['PATH'] = f"{os.path.dirname(sys.executable)};{env['PATH']}"
+
+    # 프로젝트 루트 디렉토리 설정
+    project_root = os.path.dirname(os.path.dirname(job['config_path']))
+    os.chdir(project_root)
+    env['PROJECT_ROOT'] = project_root
+
+    # config 파일 읽기 (수정된 부분)
+    with open(job['config_path'], 'r') as f:
+        config = yaml.safe_load(f)
+
+    os.chdir(os.path.dirname(job['script_path']))
+
+    # config 파일의 경로 업데이트
+    config['data']['data_dir'] = project_root
+    config['data']['train_dir'] = os.path.join(project_root, 'data', 'train')
+    config['data']['train_info_file'] = os.path.join(project_root, 'data', 'train.csv')
+    config['data']['test_dir'] = os.path.join(project_root, 'data', 'test')
+    config['data']['test_info_file'] = os.path.join(project_root, 'data', 'test.csv')
+    config['data']['augmented_dir'] = os.path.join(project_root, 'data', 'augmented.csv')
+
+    # 파일 존재 여부 확인
+    for key in ['train_info_file', 'test_info_file']:
+        if not os.path.exists(config['data'][key]):
+            logger.error(f"{key} not found: {config['data'][key]}")
+            release_gpu(r, gpu_id)
+            return False
+        
+    # train_file과 test_file 경로 설정
+    train_file = os.path.join(project_root, 'data', 'train.csv')
+    test_file = os.path.join(project_root, 'data', 'test.csv')
+    aug_file = os.path.join(project_root, 'data', 'augmented.csv')
+
+    logger.info(f"Train file path: {train_file}")
+    logger.info(f"Test file path: {test_file}")
+    logger.info(f"Aug file path: {aug_file}")
+
+    if not os.path.exists(train_file) or not os.path.exists(test_file):
+        logger.error(f"Train file ({train_file}) or test file ({test_file}) not found")
+        release_gpu(r, gpu_id)
+        return False
+    
+    # 자동 augmentation 진행
+    if not os.path.exists(aug_file):
+        logger.info(f"Augmented file ({aug_file}) not found. Sending job to augmentation queue")
+        # 전송
+        channel.basic_publish(
+            exchange='',
+            routing_key=AUGMENTATION_QUEUE,
+            body=json.dumps({
+                'config_path': job['config_path'],
+                'script_path': job['script_path'],
+                'data_path': job['data_path'],
+                'aug_path': job['aug_path'],
+                'train_csv_path': train_file,
+                'test_csv_path': test_file
+            }),
+            properties=pika.BasicProperties(delivery_mode=2,)
+        )
+        release_gpu(r, gpu_id)
+        return False
+
+    config['data']['train_info_file'] = os.path.join('data', 'train.csv')
+    config['data']['test_info_file'] = os.path.join('data', 'test.csv')
+    config['data']['augmented_info_file'] = os.path.join('data', 'augemted.csv')
+
+    temp_config_path = f"temp_config_{job['user']}_{job['model_name']}.yaml"
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
+        temp_config_path = temp_file.name
+        yaml.dump(config, temp_file)
+
+    logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Actual train file path: {os.path.abspath(config['data']['train_info_file'])}")
+    logger.info(f"Augmented file path: {os.path.abspath(config['data']['augmented_info_file'])}")
 
     command = [
-        'python', job['script_path'],
-        'config_path', job['config_path'],
+        sys.executable,
+        job['script_path'],
+        'config_path', temp_config_path,
         '--model_name', job['model_name'],
-        '--learning_rate', job['learning_rate']
+        '--learning_rate', str(job['learning_rate'])
     ]
 
     process = None
 
     try:
+        os.chdir(os.path.dirname(os.path.dirname(job['config_path'])))
+
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
+
+        stdout, stderr = process.communicate()
 
         job_key = f"job_result:{job['user']}:{job['model_name']}"
 
@@ -112,6 +194,10 @@ def run_job(job, r):
             return True
         else:
             logger.error(f"\nJob failed for user {job['user']}")
+            logger.error(f"\nJob Error: {stderr}, out msg: {stdout}")
+            logger.info(f"Project root: {job['data_path']}")
+            logger.info(f"Train file path: {train_file}")
+            logger.info(f"Test file path: {test_file}")
             return False
     except Exception as e:
         logger.error(f"\nError during job execution: {str(e)}")
@@ -120,6 +206,8 @@ def run_job(job, r):
         logger.error(f"\n Error KeyboardInterrupt")
         return False
     finally:
+        if os.path.exists(temp_config_path):
+            os.remove(temp_config_path)
         if process and process.poll() is None:
             process.terminate()
             process.wait()
@@ -201,24 +289,35 @@ def process_output(line, job_key, r):
         print(log_message)
         logger.info(log_message)
 
-def process_message(message):
+def process_message(message, channel):
     try:
-        decompressed_message = zlib.decompress(message)
-        job = json.loads(decompressed_message.decode())
+        try:
+            decompressed_message = zlib.decompress(message)
+            job = json.loads(decompressed_message.decode())
+        except zlib.error:
+            job = json.loads(message.decode())
+
         logger.info(f"Processing job: {job}")
-        result = run_job(job, r)
+        result = run_job(job, r, channel)
+    
         if result:
             job_key = f"job_result:{job['user']}:{job['model_name']}"
             all_keys = r.hkeys(job_key)
             epoch_keys = [key for key in all_keys if key.startswith(b'epoch_')]
-            last_epoch = max([int(key.split(b'_')[1]) for key in epoch_keys])
-            final_metric = r.hget(job_key, f"epoch_{last_epoch}_val_metric")
-            if final_metric:
-                logger.info(f"Job completed for user {job['user']}. Final accuracy: {final_metric.decode('utf-8')}")
+            if epoch_keys:
+                last_epoch = max([int(key.split(b'_')[1]) for key in epoch_keys])
+                final_metric = r.hget(job_key, f"epoch_{last_epoch}_val_metric")
+                if final_metric:
+                    logger.info(f"Job completed for user {job['user']}. Final accuracy: {final_metric.decode('utf-8')}")
+                else:
+                    logger.warning(f"Job completed for user {job['user']} but final accuracy not found")
             else:
-                logger.warning(f"Job completed for user {job['user']} but final accuracy not found")
+                logger.warning(f"Job completed for user {job['user']} but no epoch data found")
         else:
             logger.error(f"Job failed for user {job['user']}")
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON: {e}")
+        return
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}")
     except KeyboardInterrupt as e:
@@ -230,7 +329,8 @@ def process_batch(messages):
 
 def callback(ch, method, properties, body):
     try:
-        process_message(body)
+        logger.info(f"Received message: {body[:100]}...")
+        process_message(body, ch)
     except Exception as e:
         logger.error(f"Error processing message: {e}")
     finally:
@@ -242,6 +342,7 @@ def main():
     try:
         connection, channel = connect_to_rabbitmq()
         initialize_gpu_list(r)
+        channel.queue_declare(queue=AUGMENTATION_QUEUE)
         channel.basic_qos(prefetch_count=1)
         channel.basic_consume(queue=RABBITMQ_QUEUE, on_message_callback=callback)
         logger.info(' [*] Waiting for messages. To exit press CTRL+C')

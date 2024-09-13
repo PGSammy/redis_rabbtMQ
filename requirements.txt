@@ -1,3 +1,13 @@
 redis
 pika
 PyYAML
+torch==2.4.1+cu118
+torchvision==0.19.1+cu118
+torchaudio==2.4.1+cu118
+--find-links https://download.pytorch.org/whl/cu118
+timm == 1.0.3
+transformers
+opencv-python
+pandas
+scikit-learn
+albumentations

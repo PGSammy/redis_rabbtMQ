@@ -13,6 +13,8 @@ USER_NAME: str = os.environ.get('USER_NAME', 'default_user')
 # 사용자별 고유 큐 생성
 RABBITMQ_QUEUE: str = f'gpu_tasks_{USER_NAME}'
 
+AUGMENTATION_QUEUE:str = 'augmentation_queue'
+
 # 설정 그룹화
 RABBITMQ_CONFIG: Dict[str, str] = {
     'HOST': RABBITMQ_HOST,
