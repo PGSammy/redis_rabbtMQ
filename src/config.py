@@ -2,8 +2,8 @@ import os
 import logging
 from typing import Dict
 
-RABBITMQ_HOST: str = os.environ.get('RABBITMQ_HOST', 'localhost')
-REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+RABBITMQ_HOST: str = os.environ.get('RABBITMQ_HOST', '127.0.0.1')
+REDIS_HOST = os.environ.get('REDIS_HOST', '127.0.0.1')
 REDIS_PORT: int = int(os.environ.get('REDIS_PORT', 6379))
 REDIS_DB = int(os.environ.get('REDIS_DB', 0))
 

@@ -1,16 +1,4 @@
-import pika
-
-connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
-channel = connection.channel()
-
-channel.queue_declare(queue='hello')
-
-def callback(ch, method, properties, body):
-    print(f" [x] Received {body}")
-
-channel.basic_consume(queue='hello',
-                      auto_ack=True,
-                      on_message_callback=callback)
-
-print(' [*] Waiting for messages. To exit press CTRL+C')
-channel.start_consuming()
+import torch
+print(torch.cuda.is_available())
+print(torch.cuda.device_count())
+print(torch.cuda.get_device_name(0))
