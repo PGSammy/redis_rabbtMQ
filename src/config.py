@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 # .env load
 load_dotenv()
 
-RABBITMQ_HOST: str = os.getenv('RABBITMQ_HOST', 'localhost')
+RABBITMQ_HOST: str = os.getenv('RABBITMQ_HOST', '127.0.0.1')
 RABBITMQ_PORT: int = int(os.getenv('RABBITMQ_PORT', 5672))
 RABBITMQ_USER: str = os.getenv('RABBITMQ_USER', 'guest')
 RABBITMQ_PASSWORD: str = os.getenv('RABBITMQ_PASSWORD', 'guest')
 
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_HOST = os.getenv('REDIS_HOST', '127.0.0.1')
 REDIS_PORT: int = int(os.getenv('REDIS_PORT', 6379))
 REDIS_DB = int(os.getenv('REDIS_DB', 0))
 REDIS_PASSWORD: str = os.getenv('REDIS_PASSWORD', '')
