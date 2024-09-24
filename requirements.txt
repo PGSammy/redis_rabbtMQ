@@ -11,3 +11,5 @@ opencv-python
 pandas
 scikit-learn
 albumentations
+optuna
+python-dotenv

@@ -4,22 +4,35 @@ import argparse
 import pika.exceptions
 import yaml
 import time
-from config import RABBITMQ_HOST, RABBITMQ_QUEUE, USER_NAME
+from config import RABBITMQ_CONFIG, USER_NAME
 import sys
 import logging
 import zlib
+import os
 
 logger = logging.getLogger(__name__)
 
 # config.yaml 가져오기
 def get_config(yaml_path):
-    try:
-        with open(yaml_path, 'r') as file:
-            config = yaml.safe_load(file)
-        return config
-    except (yaml.YAMLError, FileNotFoundError) as e:
-        logger.error(f"Error reading config file: {e}")
-        raise
+    config = {}
+
+    yaml_files = [f for f in os.listdir(yaml_path) if f.endswith('.yaml')]
+
+    for files in yaml_files:
+        file_path = os.path.join(yaml_path, files)
+        try:
+            with open(file_path, 'r') as f:
+                yaml_content = yaml.safe_load(f)
+                if yaml_content:
+                    config.update(yaml_content)
+            logger.info(f"Loaded config file: {files}")
+        except Exception as e:
+            logger.warning(f"Failed loading config file {files} as {e}")
+    
+    if not config:
+        logger.warning(f"No valid YAML files found in {yaml_path}")
+
+    return config
 
 # config 정보 추출 (추후 추가 예정)
 def extract_info(config):
@@ -34,9 +47,13 @@ def connect_to_rabbitmq():
     RETRY_DELAY = 5  # seconds
     while retries < MAX_RETRIES:
         try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters(RABBITMQ_HOST))
+            connection = pika.BlockingConnection(pika.ConnectionParameters(
+                host=RABBITMQ_CONFIG['HOST'],
+                port=RABBITMQ_CONFIG['PORT'],
+                credentials=pika.PlainCredentials(RABBITMQ_CONFIG['USER'], RABBITMQ_CONFIG['PASSWORD'])
+            ))
             channel = connection.channel()
-            channel.queue_declare(queue=RABBITMQ_QUEUE)
+            channel.queue_declare(queue=RABBITMQ_CONFIG['QUEUE'])
             logger.info("Successfully connected to RabbitMQ")
             return connection, channel
         except pika.exceptions.AMQPConnectionError as e:
@@ -53,7 +70,7 @@ def connect_to_rabbitmq():
 def submit_job(channel, job_data):
     channel.basic_publish(
         exchange='',
-        routing_key=RABBITMQ_QUEUE,
+        routing_key=RABBITMQ_CONFIG['QUEUE'],
         body=json.dumps(job_data),
         properties=pika.BasicProperties(delivery_mode=2)
     )
@@ -65,7 +82,7 @@ def main():
     parser.add_argument('--config_path', type=str, required=True, help='Path to the YAML config file')
     parser.add_argument('--script_path', type=str, required=True, help='Path to the training script')
     parser.add_argument('--data_path', type=str, required=True, help='Path to the data directory')
-    parser.add_argument('--aug_path', type=str, required=True, help='Path to the aug directory')
+    # parser.add_argument('--aug_path', type=str, required=True, help='Path to the aug directory')
     args = parser.parse_args()
 
     try:
@@ -79,7 +96,7 @@ def main():
             'script_path': args.script_path,
             'config_path': args.config_path,
             'data_path': args.data_path,
-            'aug_path': args.aug_path,
+            # 'aug_path': args.aug_path,
             'model_name': model_name,
             'learning_rate': learning_rate
         }
@@ -88,7 +105,7 @@ def main():
 
         channel.basic_publish(
             exchange='',
-            routing_key=RABBITMQ_QUEUE,
+            routing_key=RABBITMQ_CONFIG['QUEUE'],
             body=compressed_message,
             properties=pika.BasicProperties(delivery_mode=2)
         )

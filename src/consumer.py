@@ -13,7 +13,7 @@ import signal
 import sys
 import yaml
 import tempfile
-from config import RABBITMQ_HOST, RABBITMQ_QUEUE, REDIS_HOST, REDIS_PORT, REDIS_DB, AUGMENTATION_QUEUE
+from config import RABBITMQ_CONFIG, REDIS_CONFIG
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -25,7 +25,7 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+r = redis.Redis(host=REDIS_CONFIG['HOST'], port=REDIS_CONFIG['PORT'], db=REDIS_CONFIG['DB'], password=REDIS_CONFIG['PASSWORD'])
 
 # rabbitmq의 queue와 연결
 def connect_to_rabbitmq():
@@ -34,9 +34,16 @@ def connect_to_rabbitmq():
     RETRY_DELAY = 5  # seconds
     while retries < MAX_RETRIES:
         try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters(RABBITMQ_HOST))
+            logger.info(f"Attempting to connect to RabbitMQ with host: {RABBITMQ_CONFIG['HOST']}, port: {RABBITMQ_CONFIG['PORT']}, user: {RABBITMQ_CONFIG['USER']}, pw: {RABBITMQ_CONFIG['PASSWORD']}")
+            connection = pika.BlockingConnection(
+                pika.ConnectionParameters(
+                host=RABBITMQ_CONFIG['HOST'],
+                port=RABBITMQ_CONFIG['PORT'],
+                credentials=pika.PlainCredentials(RABBITMQ_CONFIG['USER'], RABBITMQ_CONFIG['PASSWORD'])
+                )
+            )
             channel = connection.channel()
-            channel.queue_declare(queue=RABBITMQ_QUEUE)
+            channel.queue_declare(queue=RABBITMQ_CONFIG['QUEUE'])
             logger.info("Successfully connected to RabbitMQ")
             return connection, channel
         except pika.exceptions.AMQPConnectionError as e:
@@ -85,18 +92,28 @@ def run_job(job, r, channel):
     env['PATH'] = f"{os.path.dirname(sys.executable)};{env['PATH']}"
 
     # 프로젝트 루트 디렉토리 설정
-    project_root = os.path.dirname(os.path.dirname(job['config_path']))
+    project_root = os.path.dirname(job['config_path'])
     os.chdir(project_root)
     env['PROJECT_ROOT'] = project_root
 
+    main_script_dir = os.path.dirname(job['script_path'])
+    os.chdir(main_script_dir)
+
+    config = {}
+    config_dir = os.path.join(project_root, 'configs')
+    for config_file in os.listdir(config_dir):
+        if config_file.endswith('yaml'):
+            with open(os.path.join(config_dir, config_file), 'r') as f:
+                config.update(yaml.safe_load(f))
+
     # config 파일 읽기 (수정된 부분)
-    with open(job['config_path'], 'r') as f:
-        config = yaml.safe_load(f)
+    # with open(job['config_path'], 'r') as f:
+    #     config = yaml.safe_load(f)
 
     os.chdir(os.path.dirname(job['script_path']))
 
     # config 파일의 경로 업데이트
-    config['data']['data_dir'] = project_root
+    config['data']['data_dir'] = os.path.join(project_root, 'data')
     config['data']['train_dir'] = os.path.join(project_root, 'data', 'train')
     config['data']['train_info_file'] = os.path.join(project_root, 'data', 'train.csv')
     config['data']['test_dir'] = os.path.join(project_root, 'data', 'test')
@@ -125,28 +142,40 @@ def run_job(job, r, channel):
         return False
     
     # 자동 augmentation 진행
-    if not os.path.exists(aug_file):
-        logger.info(f"Augmented file ({aug_file}) not found. Sending job to augmentation queue")
-        # 전송
-        channel.basic_publish(
-            exchange='',
-            routing_key=AUGMENTATION_QUEUE,
-            body=json.dumps({
-                'config_path': job['config_path'],
-                'script_path': job['script_path'],
-                'data_path': job['data_path'],
-                'aug_path': job['aug_path'],
-                'train_csv_path': train_file,
-                'test_csv_path': test_file
-            }),
-            properties=pika.BasicProperties(delivery_mode=2,)
-        )
-        release_gpu(r, gpu_id)
-        return False
+    # if not os.path.exists(aug_file):
+    #     logger.info(f"Augmented file ({aug_file}) not found. Sending job to augmentation queue")
+    #     try:
+    #         # 전송
+    #         channel.basic_publish(
+    #             exchange='',
+    #             routing_key=AUGMENTATION_QUEUE,
+    #             body=json.dumps({
+    #                 'config_path': job['config_path'],
+    #                 'script_path': job['script_path'],
+    #                 'data_path': job['data_path'],
+    #                 'aug_path': job['aug_path'],
+    #                 'train_csv_path': train_file,
+    #                 'test_csv_path': test_file
+    #             }),
+    #             properties=pika.BasicProperties(delivery_mode=2,)
+    #         )
+    #         release_gpu(r, gpu_id)
+    #     except json.JSONDecodeError as je:
+    #         logger.error(f"JSON encoding error: {je}")
+    #         release_gpu(r, gpu_id)
+    #         return False
+    #     except pika.exceptions.AMQPError as ae:
+    #         logger.error(f"AMQP error when sending message: {ae}")
+    #         release_gpu(r, gpu_id)
+    #         return False
+    #     except Exception as e:
+    #         logger.error(f"Unexpected error when sending message: {e}")
+    #         release_gpu(r, gpu_id)
+    #         return False
 
     config['data']['train_info_file'] = os.path.join('data', 'train.csv')
     config['data']['test_info_file'] = os.path.join('data', 'test.csv')
-    config['data']['augmented_info_file'] = os.path.join('data', 'augemted.csv')
+    config['data']['augmented_info_file'] = os.path.join('data', 'augmented.csv')
 
     temp_config_path = f"temp_config_{job['user']}_{job['model_name']}.yaml"
 
@@ -158,10 +187,13 @@ def run_job(job, r, channel):
     logger.info(f"Actual train file path: {os.path.abspath(config['data']['train_info_file'])}")
     logger.info(f"Augmented file path: {os.path.abspath(config['data']['augmented_info_file'])}")
 
+    mode = config.get('mode', 'train')
+
     command = [
         sys.executable,
-        job['script_path'],
-        'config_path', temp_config_path,
+        os.path.basename(job['script_path']),
+        'config_path', os.path.relpath(config_dir, main_script_dir),
+        '--mode', mode,
         '--model_name', job['model_name'],
         '--learning_rate', str(job['learning_rate'])
     ]
@@ -169,7 +201,7 @@ def run_job(job, r, channel):
     process = None
 
     try:
-        os.chdir(os.path.dirname(os.path.dirname(job['config_path'])))
+        # os.chdir(os.path.dirname(os.path.dirname(job['config_path'])))
 
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
 
@@ -206,13 +238,12 @@ def run_job(job, r, channel):
         logger.error(f"\n Error KeyboardInterrupt")
         return False
     finally:
-        if os.path.exists(temp_config_path):
-            os.remove(temp_config_path)
         if process and process.poll() is None:
             process.terminate()
             process.wait()
         release_gpu(r, gpu_id)
         print(f"GPU {gpu_id} Returned\n")
+        os.chdir(project_root)
 
 def process_output(line, job_key, r):
     # 실시간 출력
@@ -299,7 +330,9 @@ def process_message(message, channel):
 
         logger.info(f"Processing job: {job}")
         result = run_job(job, r, channel)
-    
+
+        mode_name = job['mode']
+
         if result:
             job_key = f"job_result:{job['user']}:{job['model_name']}"
             all_keys = r.hkeys(job_key)
@@ -342,9 +375,9 @@ def main():
     try:
         connection, channel = connect_to_rabbitmq()
         initialize_gpu_list(r)
-        channel.queue_declare(queue=AUGMENTATION_QUEUE)
+        # channel.queue_declare(queue=AUGMENTATION_QUEUE)
         channel.basic_qos(prefetch_count=1)
-        channel.basic_consume(queue=RABBITMQ_QUEUE, on_message_callback=callback)
+        channel.basic_consume(queue=RABBITMQ_CONFIG['QUEUE'], on_message_callback=callback)
         logger.info(' [*] Waiting for messages. To exit press CTRL+C')
         channel.start_consuming()
     except KeyboardInterrupt:
