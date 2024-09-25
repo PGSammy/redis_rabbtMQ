@@ -334,8 +334,6 @@ def process_message(message, channel):
         logger.info(f"Processing job: {job}")
         result = run_job(job, r, channel)
 
-        mode_name = job['mode']
-
         if result:
             job_key = f"job_result:{job['user']}:{job['model_name']}"
             all_keys = r.hkeys(job_key)
