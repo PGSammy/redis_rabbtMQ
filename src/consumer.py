@@ -13,6 +13,7 @@ import signal
 import sys
 import yaml
 import tempfile
+from pika.exceptions import AMQPConnectionError, AMQPChannelError
 from config import RABBITMQ_CONFIG, REDIS_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -39,14 +40,16 @@ def connect_to_rabbitmq():
                 pika.ConnectionParameters(
                 host=RABBITMQ_CONFIG['HOST'],
                 port=RABBITMQ_CONFIG['PORT'],
-                credentials=pika.PlainCredentials(RABBITMQ_CONFIG['USER'], RABBITMQ_CONFIG['PASSWORD'])
+                credentials=pika.PlainCredentials(RABBITMQ_CONFIG['USER'], RABBITMQ_CONFIG['PASSWORD']),
+                heartbeat=600,
+                blocked_connection_timeout=300
                 )
             )
             channel = connection.channel()
             channel.queue_declare(queue=RABBITMQ_CONFIG['QUEUE'])
             logger.info("Successfully connected to RabbitMQ")
             return connection, channel
-        except pika.exceptions.AMQPConnectionError as e:
+        except AMQPConnectionError as e:
             retries += 1
             logger.warning(f"Failed to connect to RabbitMQ (attempt {retries}/{MAX_RETRIES}): {e}")
             if retries < MAX_RETRIES:
@@ -238,7 +241,7 @@ def run_job(job, r, channel):
         logger.error(f"\n Error KeyboardInterrupt")
         return False
     finally:
-        if process and process.poll() is None:
+        if process in locals() and process.poll() is None:
             process.terminate()
             process.wait()
         release_gpu(r, gpu_id)
@@ -247,7 +250,7 @@ def run_job(job, r, channel):
 
 def process_output(line, job_key, r):
     # 실시간 출력
-    print(line.strip())
+    # print(line.strip())
     logger.info(line.strip())
 
     # 에폭 결과 파싱
@@ -265,32 +268,32 @@ def process_output(line, job_key, r):
 
     pipe = r.pipeline()
 
-    if matches['epoch']:
+    if matches['epoch_pattern']:
         is_additional = matches['epoch'].group(1) is not None
         current_epoch, total_epochs = matches['epoch'].group(2), matches['epoch'].group(3)
         pipe.hset(job_key, "current_epoch", current_epoch)
         pipe.hset(job_key, "total_epochs", total_epochs)
         pipe.hset(job_key, "is_additional_training", "1" if is_additional else "0")
     
-    if matches['loss']:
+    if matches['loss_pattern']:
         train_loss, train_metric = matches['loss'].groups()
         current_epoch = r.hget(job_key, "current_epoch").decode()
         pipe.hset(job_key, f"epoch_{current_epoch}_train_loss", f"{float(train_loss):.4f}")
         pipe.hset(job_key, f"epoch_{current_epoch}_train_metric", f"{float(train_metric):.4f}")
     
-    if matches['val']:
+    if matches['val_pattern']:
         val_loss, val_metric = matches['val'].groups()
         current_epoch = r.hget(job_key, "current_epoch").decode()
         pipe.hset(job_key, f"epoch_{current_epoch}_val_loss", f"{float(val_loss):.4f}")
         pipe.hset(job_key, f"epoch_{current_epoch}_val_metric", f"{float(val_metric):.4f}")
 
-    for key in ['class_loss', 'class_metric', 'val_class_loss', 'val_class_metric']:
+    for key in ['class_loss_pattern', 'class_metric_pattern', 'val_class_loss_pattern', 'val_class_metric_pattern']:
         if matches[key]:
             pipe.hset(job_key, f"epoch_{current_epoch}_{key}", matches[key].group(1))
 
     pipe.execute()
 
-    if all(matches[k] for k in ['loss', 'val', 'class_loss', 'class_metric', 'val_class_loss', 'val_class_metric']):
+    if all(matches[k] for k in ['loss_pattern', 'val_pattern', 'class_loss_pattern', 'class_metric_pattern', 'val_class_loss_pattern', 'val_class_metric_pattern']):
         epoch_type = "Additional " if is_additional else ""
         log_message = f"\n{epoch_type}Epoch {current_epoch}/{total_epochs} 완료:"
         print(log_message)
@@ -304,19 +307,19 @@ def process_output(line, job_key, r):
         print(log_message)
         logger.info(log_message)
         
-        log_message = f" Train Class Losses: {matches['class_loss'].group(1)}"
+        log_message = f" Train Class Losses: {matches['class_loss_pattern'].group(1)}"
         print(log_message)
         logger.info(log_message)
         
-        log_message = f" Train Class Metric: {matches['class_metric'].group(1)}"
+        log_message = f" Train Class Metric: {matches['class_metric_pattern'].group(1)}"
         print(log_message)
         logger.info(log_message)
         
-        log_message = f" Val Class Losses: {matches['val_class_loss'].group(1)}"
+        log_message = f" Val Class Losses: {matches['val_class_loss_pattern'].group(1)}"
         print(log_message)
         logger.info(log_message)
         
-        log_message = f" Val Class Metric: {matches['val_class_metric'].group(1)}"
+        log_message = f" Val Class Metric: {matches['val_class_metric_pattern'].group(1)}"
         print(log_message)
         logger.info(log_message)
 
@@ -372,21 +375,28 @@ def callback(ch, method, properties, body):
 def main():
     print(f"Number of available GPUs: {torch.cuda.device_count()}")
     print(f"CUDA is available: {torch.cuda.is_available()}")
-    try:
-        connection, channel = connect_to_rabbitmq()
-        initialize_gpu_list(r)
-        # channel.queue_declare(queue=AUGMENTATION_QUEUE)
-        channel.basic_qos(prefetch_count=1)
-        channel.basic_consume(queue=RABBITMQ_CONFIG['QUEUE'], on_message_callback=callback)
-        logger.info(' [*] Waiting for messages. To exit press CTRL+C')
-        channel.start_consuming()
-    except KeyboardInterrupt:
-        logger.info("Consumer 종료")
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-    finally:
-        if connection and not connection.is_closed:
-            connection.close()
+    while True:
+        try:
+            connection, channel = connect_to_rabbitmq()
+            initialize_gpu_list(r)
+            # channel.queue_declare(queue=AUGMENTATION_QUEUE)
+            channel.basic_qos(prefetch_count=1)
+            channel.basic_consume(queue=RABBITMQ_CONFIG['QUEUE'], on_message_callback=callback)
+            logger.info(' [*] Waiting for messages. To exit press CTRL+C')
+            channel.start_consuming()
+        except KeyboardInterrupt:
+            logger.info("Consumer 종료")
+        except (AMQPConnectionError, AMQPChannelError) as e:
+            logger.error(f"RabbitMQ connection error: {e}")
+            logger.info("Attempting to reconnect in 5 seconds...")
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+            logger.info("Attempting to reconnect in 5 seconds...")
+            time.sleep(5)
+        finally:
+            if connection and not connection.is_closed:
+                connection.close()
 
 if __name__ == "__main__":
     main()
