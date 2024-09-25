@@ -13,6 +13,7 @@ import signal
 import sys
 import yaml
 import tempfile
+import signal
 from pika.exceptions import AMQPConnectionError, AMQPChannelError
 from config import RABBITMQ_CONFIG, REDIS_CONFIG
 
@@ -373,28 +374,45 @@ def callback(ch, method, properties, body):
 def main():
     print(f"Number of available GPUs: {torch.cuda.device_count()}")
     print(f"CUDA is available: {torch.cuda.is_available()}")
-    while True:
-        try:
-            connection, channel = connect_to_rabbitmq()
-            initialize_gpu_list(r)
-            # channel.queue_declare(queue=AUGMENTATION_QUEUE)
-            channel.basic_qos(prefetch_count=1)
-            channel.basic_consume(queue=RABBITMQ_CONFIG['QUEUE'], on_message_callback=callback)
-            logger.info(' [*] Waiting for messages. To exit press CTRL+C')
-            channel.start_consuming()
-        except KeyboardInterrupt:
-            logger.info("Consumer 종료")
-        except (AMQPConnectionError, AMQPChannelError) as e:
-            logger.error(f"RabbitMQ connection error: {e}")
-            logger.info("Attempting to reconnect in 5 seconds...")
-            time.sleep(5)
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            logger.info("Attempting to reconnect in 5 seconds...")
-            time.sleep(5)
-        finally:
-            if connection and not connection.is_closed:
-                connection.close()
+
+    channel = None
+    connection = None
+
+    def signal_handler(signum, frame):
+        logger.info("Interrupt received, stopping consumer...")
+        if 'channel' in globals() and channel.is_open:
+            channel.stop_consuming()
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        while True:
+            try:
+                connection, channel = connect_to_rabbitmq()
+                initialize_gpu_list(r)
+                # channel.queue_declare(queue=AUGMENTATION_QUEUE)
+                channel.basic_qos(prefetch_count=1)
+                channel.basic_consume(queue=RABBITMQ_CONFIG['QUEUE'], on_message_callback=callback)
+                logger.info(' [*] Waiting for messages. To exit press CTRL+C')
+                channel.start_consuming()
+            except (AMQPConnectionError, AMQPChannelError) as e:
+                logger.error(f"RabbitMQ connection error: {e}")
+                logger.info("Attempting to reconnect in 5 seconds...")
+                time.sleep(5)
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}")
+                logger.info("Attempting to reconnect in 5 seconds...")
+                time.sleep(5)
+    except KeyboardInterrupt:
+        logger.info("Consumer 종료")
+    finally:
+        if channel and channel.is_open:
+            channel.stop_consuming()
+        if connection and not connection.is_closed:
+            connection.close()
+        logger.info("Connection Closed")
+
 
 if __name__ == "__main__":
     main()
