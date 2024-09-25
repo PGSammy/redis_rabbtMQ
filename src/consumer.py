@@ -355,8 +355,12 @@ def process_message(message, channel):
         return
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}")
+        return
     except KeyboardInterrupt as e:
         logger.error(f"KeyboardInterrupt. 종료.")
+        return
+    finally:
+        logger.info("[*] Waiting for messages. To exit press CTRL+C")
 
 def process_batch(messages):
     for message in messages:
