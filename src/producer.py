@@ -9,7 +9,9 @@ import sys
 import logging
 import zlib
 import os
+import logging.config
 
+logging.config.fileConfig('logging.conf')
 logger = logging.getLogger(__name__)
 
 # config.yaml 가져오기
@@ -39,6 +41,13 @@ def extract_info(config):
     model_name = config['model']['name']
     learning_rate = config['training']['learning_rate']
     return model_name, learning_rate
+
+# config validate
+def validate_config(config):
+    required_keys = ['model', 'training']
+    for key in required_keys:
+        if key not in config:
+            raise ValueError(f"Missing required key in config: {key}")
 
 # rabbitmq 연결
 def connect_to_rabbitmq():

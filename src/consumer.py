@@ -294,35 +294,64 @@ def process_output(line, job_key, r):
 
     pipe.execute()
 
-    if all(matches[k] for k in ['loss_pattern', 'val_pattern', 'class_loss_pattern', 'class_metric_pattern', 'val_class_loss_pattern', 'val_class_metric_pattern']):
+    required_patterns = ['loss_pattern', 'val_pattern']
+    optional_patterns = ['class_loss_pattern', 'class_metric_pattern', 'val_class_loss_pattern', 'val_class_metric_pattern']
+
+    # if all(matches[k] for k in ['loss_pattern', 'val_pattern', 'class_loss_pattern', 'class_metric_pattern', 'val_class_loss_pattern', 'val_class_metric_pattern']):
+    if all(matches[k] for k in required_patterns) and any(matches[k] for k in optional_patterns):
         epoch_type = "Additional " if is_additional else ""
-        log_message = f"\n{epoch_type}Epoch {current_epoch}/{total_epochs} 완료:"
-        print(log_message)
-        logger.info(log_message)
+        current_epoch = r.hget(job_key, "current_epoch").decode()
+        total_epochs = r.hget(job_key, "total_epochs").decode()
+
+        # 메시지 변수
+        log_msg = f"\n{epoch_type}Epoch {current_epoch}/{total_epochs} 완료:"
+        train_msg = f" Train Loss: {train_loss:.4f}, Train Metric: {train_metric:.4f}"
+        val_msg = f" Val Loss: {val_loss:.4f}, Val Metric: {val_metric:.4f}"
+        train_class_loss_msg = f" Train Class Losses: {matches['class_loss_pattern'].group(1)}"
+        train_class_metric_msg = f" Train Class Losses: {matches['class_loss_pattern'].group(1)}"
+        val_class_loss_msg = f" Val Class Losses: {matches['val_class_loss_pattern'].group(1)}"
+        val_class_metric_msg = f" Val Class Metric: {matches['val_class_metric_pattern'].group(1)}"
+
+        # message 클래스 list
+        messages = [
+            log_msg,
+            train_msg,
+            val_msg,
+            train_class_loss_msg,
+            train_class_metric_msg,
+            val_class_loss_msg,
+            val_class_metric_msg
+        ]
+
+        # 출력과 동시에 logging
+        for msg in messages:
+            print(msg)
+            logger.inf(msg)
+
+        # 기록용 남겨놓기
+        # log_message = f" Train Loss: {train_loss:.4f}, Train Metric: {train_metric:.4f}"
+        # print(log_message)
+        # logger.info(log_message)
         
-        log_message = f" Train Loss: {train_loss:.4f}, Train Metric: {train_metric:.4f}"
-        print(log_message)
-        logger.info(log_message)
+        # log_message = f" Val Loss: {val_loss:.4f}, Val Metric: {val_metric:.4f}"
+        # print(log_message)
+        # logger.info(log_message)
         
-        log_message = f" Val Loss: {val_loss:.4f}, Val Metric: {val_metric:.4f}"
-        print(log_message)
-        logger.info(log_message)
+        # log_message = f" Train Class Losses: {matches['class_loss_pattern'].group(1)}"
+        # print(log_message)
+        # logger.info(log_message)
         
-        log_message = f" Train Class Losses: {matches['class_loss_pattern'].group(1)}"
-        print(log_message)
-        logger.info(log_message)
+        # log_message = f" Train Class Metric: {matches['class_metric_pattern'].group(1)}"
+        # print(log_message)
+        # logger.info(log_message)
         
-        log_message = f" Train Class Metric: {matches['class_metric_pattern'].group(1)}"
-        print(log_message)
-        logger.info(log_message)
+        # log_message = f" Val Class Losses: {matches['val_class_loss_pattern'].group(1)}"
+        # print(log_message)
+        # logger.info(log_message)
         
-        log_message = f" Val Class Losses: {matches['val_class_loss_pattern'].group(1)}"
-        print(log_message)
-        logger.info(log_message)
-        
-        log_message = f" Val Class Metric: {matches['val_class_metric_pattern'].group(1)}"
-        print(log_message)
-        logger.info(log_message)
+        # log_message = f" Val Class Metric: {matches['val_class_metric_pattern'].group(1)}"
+        # print(log_message)
+        # logger.info(log_message)
 
 def process_message(message, channel):
     try:
