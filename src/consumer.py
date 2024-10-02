@@ -14,6 +14,7 @@ import sys
 import yaml
 import tempfile
 import signal
+import importlib.util
 from pika.exceptions import AMQPConnectionError, AMQPChannelError
 from config import RABBITMQ_CONFIG, REDIS_CONFIG
 
@@ -89,10 +90,10 @@ def release_gpu(r: redis.Redis, gpu_id: int):
     r.set('available_gpus', json.dumps(available_gpus))
     print(f"GPU {gpu_id} released.")
 
-def run_job(job, r, channel):
-    gpu_id = get_available_gpu(r)
+def run_job(job, r, channel, gpu_id):
+    # gpu_id = get_available_gpu(r)
     env = os.environ.copy()
-    env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    # env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
     env['PATH'] = f"{os.path.dirname(sys.executable)};{env['PATH']}"
 
     # 프로젝트 루트 디렉토리 설정
@@ -104,11 +105,20 @@ def run_job(job, r, channel):
     os.chdir(main_script_dir)
 
     config = {}
+    # 여기에서 본인의 최상위 폴더 밑 config 위치 지정해주기 (configs가 아니면 config로 변경)
     config_dir = os.path.join(project_root, 'configs')
     for config_file in os.listdir(config_dir):
-        if config_file.endswith('yaml'):
-            with open(os.path.join(config_dir, config_file), 'r') as f:
+        file_path = os.path.join(config_dir, config_file)
+        if config_file.endswith('.yaml'):
+            with open(file_path, 'r') as f:
                 config.update(yaml.safe_load(f))
+        elif config_file.endswith('.py'):
+            spec = importlib.util.spec_from_file_location(config_file[:-3], file_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            py_config = {k: v for k, v in module.__dict__.items() 
+                         if not k.startswith('__') and not callable(v) and not k.startswith('_')}
+            config.update(py_config)
 
     # config 파일 읽기 (수정된 부분)
     # with open(job['config_path'], 'r') as f:
@@ -116,7 +126,7 @@ def run_job(job, r, channel):
 
     os.chdir(os.path.dirname(job['script_path']))
 
-    # config 파일의 경로 업데이트
+    # config 파일의 경로 업데이트 (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
     config['data']['data_dir'] = os.path.join(project_root, 'data')
     config['data']['train_dir'] = os.path.join(project_root, 'data', 'train')
     config['data']['train_info_file'] = os.path.join(project_root, 'data', 'train.csv')
@@ -131,7 +141,7 @@ def run_job(job, r, channel):
             release_gpu(r, gpu_id)
             return False
         
-    # train_file과 test_file 경로 설정
+    # train_file과 test_file 경로 설정 (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
     train_file = os.path.join(project_root, 'data', 'train.csv')
     test_file = os.path.join(project_root, 'data', 'test.csv')
     aug_file = os.path.join(project_root, 'data', 'augmented.csv')
@@ -177,6 +187,7 @@ def run_job(job, r, channel):
     #         release_gpu(r, gpu_id)
     #         return False
 
+    # (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
     config['data']['train_info_file'] = os.path.join('data', 'train.csv')
     config['data']['test_info_file'] = os.path.join('data', 'test.csv')
     config['data']['augmented_info_file'] = os.path.join('data', 'augmented.csv')
@@ -201,6 +212,9 @@ def run_job(job, r, channel):
         '--model_name', job['model_name'],
         '--learning_rate', str(job['learning_rate'])
     ]
+
+    if 'script_args' in job and job['script_args']:
+        command.extend(job['script_args'])
 
     process = None
 
@@ -362,7 +376,8 @@ def process_message(message, channel):
             job = json.loads(message.decode())
 
         logger.info(f"Processing job: {job}")
-        result = run_job(job, r, channel)
+        gpu_id = get_available_gpu(r)
+        result = run_job(job, r, channel, gpu_id)
 
         if result:
             job_key = f"job_result:{job['user']}:{job['model_name']}"
@@ -389,6 +404,8 @@ def process_message(message, channel):
         logger.error(f"KeyboardInterrupt. 종료.")
         return
     finally:
+        if gpu_id is not None:
+            release_gpu(r, gpu_id)
         logger.info("[*] Waiting for messages. To exit press CTRL+C")
 
 def process_batch(messages):
