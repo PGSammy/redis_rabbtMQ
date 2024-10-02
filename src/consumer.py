@@ -415,6 +415,9 @@ def main():
         logger.info("Interrupt received, stopping consumer...")
         if 'channel' in globals() and channel.is_open:
             channel.stop_consuming()
+        if 'connection' and connection.is_open:
+            connection.close()
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -445,6 +448,7 @@ def main():
         if connection and not connection.is_closed:
             connection.close()
         logger.info("Connection Closed")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
