@@ -96,14 +96,14 @@ def run_job(job, r, channel, gpu_id):
     # env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
     env['PATH'] = f"{os.path.dirname(sys.executable)};{env['PATH']}"
 
+    # 지정해준 config_path와 data_path 사용
+    config_root = job['config_path']
+    data_root = job['data_path']
+
     # 프로젝트 루트 디렉토리 설정
     project_root = os.path.dirname(job['config_path'])
     os.chdir(project_root)
     env['PROJECT_ROOT'] = project_root
-
-    # 지정해준 config_path와 data_path 사용
-    config_root = os.path.dirname(job['config_path'])
-    data_root = os.path.dirname(job['data_path'])
 
     main_script_dir = os.path.dirname(job['script_path'])
     os.chdir(main_script_dir)
@@ -131,15 +131,15 @@ def run_job(job, r, channel, gpu_id):
     os.chdir(os.path.dirname(job['script_path']))
 
     # 기본적으로 dataset이 지정된 폴더명
-    dataset_folder = 'dataset'
+    dataset_folder = 'data'
 
     # config data 파일의 경로 업데이트 
-    config[dataset_folder]['data_dir'] = os.path.join(data_root, dataset_folder)
-    config[dataset_folder]['train_dir'] = os.path.join(data_root, dataset_folder, 'train')
-    config[dataset_folder]['train_info_file'] = os.path.join(data_root, dataset_folder, 'train.csv')
-    config[dataset_folder]['test_dir'] = os.path.join(data_root, dataset_folder, 'test')
-    config[dataset_folder]['test_info_file'] = os.path.join(data_root, dataset_folder, 'test.csv')
-    config[dataset_folder]['augmented_dir'] = os.path.join(data_root, dataset_folder, 'augmented.csv')
+    config[dataset_folder]['data_dir'] = data_root
+    config[dataset_folder]['train_dir'] = os.path.join(data_root, 'train')
+    config[dataset_folder]['train_info_file'] = os.path.join(data_root, 'train.csv')
+    config[dataset_folder]['test_dir'] = os.path.join(data_root, 'test')
+    config[dataset_folder]['test_info_file'] = os.path.join(data_root, 'test.csv')
+    config[dataset_folder]['augmented_dir'] = os.path.join(data_root, 'augmented.csv')
 
     # 파일 존재 여부 확인
     for key in ['train_info_file', 'test_info_file']:
@@ -149,9 +149,9 @@ def run_job(job, r, channel, gpu_id):
             return False
         
     # train_file과 test_file 경로 설정 (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
-    train_file = os.path.join(data_root, dataset_folder, 'train.csv')
-    test_file = os.path.join(data_root, dataset_folder, 'test.csv')
-    aug_file = os.path.join(data_root, dataset_folder, 'augmented.csv')
+    train_file = os.path.join(data_root, 'train.csv')
+    test_file = os.path.join(data_root, 'test.csv')
+    aug_file = os.path.join(data_root, 'augmented.csv')
 
     logger.info(f"Train file path: {train_file}")
     logger.info(f"Test file path: {test_file}")
@@ -163,9 +163,9 @@ def run_job(job, r, channel, gpu_id):
         return False
 
     # (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
-    config[dataset_folder]['train_info_file'] = os.path.join(dataset_folder, 'train.csv')
-    config[dataset_folder]['test_info_file'] = os.path.join(dataset_folder, 'test.csv')
-    config[dataset_folder]['augmented_info_file'] = os.path.join(dataset_folder, 'augmented.csv')
+    config[dataset_folder]['train_info_file'] = os.path.join(data_root, 'train.csv')
+    config[dataset_folder]['test_info_file'] = os.path.join(data_root, 'test.csv')
+    config[dataset_folder]['augmented_info_file'] = os.path.join(data_root, 'augmented.csv')
 
     temp_config_path = f"temp_config_{job['user']}_{job['model_name']}.yaml"
 
