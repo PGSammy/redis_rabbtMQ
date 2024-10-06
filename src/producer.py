@@ -9,7 +9,7 @@ import sys
 import logging
 import zlib
 import os
-import importlib.util
+import importlib
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,7 @@ def main():
     parser.add_argument('--data_path', type=str, required=True, help='Path to the data directory')
     # parser.add_argument('--aug_path', type=str, required=True, help='Path to the aug directory')
     parser.add_argument('--model_name', type=str, help='Model name to override config')
+    parser.add_argument('--manual_model_yn', type=str, help='If model selected by user not config')
     parser.add_argument('script_args', nargs=argparse.REMAINDER, help='Additional arguments for the script')
     args = parser.parse_args()
 
@@ -112,8 +113,14 @@ def main():
         config = get_config(args.config_path)
         model_name, learning_rate = extract_info(config)
 
+        # 직접 모델을 지정했는지 안했는지
+        manual_model_yn = 'N'
+
         if args.model_name:
             model_name = args.model_name
+            # 직접 지정한 model 명인지 아닌지
+            manual_model_yn = 'Y'
+
 
         script_args = args.script_args
         if args.model_name and '--model_name' not in script_args:
@@ -127,6 +134,7 @@ def main():
             # 'aug_path': args.aug_path,
             'model_name': model_name,
             'learning_rate': learning_rate,
+            'manual_model_yn': manual_model_yn,
             'script_args': script_args
         }
 

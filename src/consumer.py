@@ -14,7 +14,7 @@ import sys
 import yaml
 import tempfile
 import signal
-import importlib.util
+import importlib
 from pika.exceptions import AMQPConnectionError, AMQPChannelError
 from config import RABBITMQ_CONFIG, REDIS_CONFIG
 
@@ -101,12 +101,20 @@ def run_job(job, r, channel, gpu_id):
     os.chdir(project_root)
     env['PROJECT_ROOT'] = project_root
 
+    # 지정해준 config_path와 data_path 사용
+    config_root = os.path.dirname(job['config_path'])
+    data_root = os.path.dirname(job['data_path'])
+
     main_script_dir = os.path.dirname(job['script_path'])
     os.chdir(main_script_dir)
 
     config = {}
-    # 여기에서 본인의 최상위 폴더 밑 config 위치 지정해주기 (configs가 아니면 config로 변경)
-    config_dir = os.path.join(project_root, 'configs')
+    # 직접 지정한 모델인 경우 모델의 이름과 같은 폴더로 매핑해주기
+    if job['manual_model_yn'] == 'Y':
+        config_dir = os.path.join(config_root, job['model_name'])
+    else:
+        config_dir = config_root
+    
     for config_file in os.listdir(config_dir):
         file_path = os.path.join(config_dir, config_file)
         if config_file.endswith('.yaml'):
@@ -120,31 +128,30 @@ def run_job(job, r, channel, gpu_id):
                          if not k.startswith('__') and not callable(v) and not k.startswith('_')}
             config.update(py_config)
 
-    # config 파일 읽기 (수정된 부분)
-    # with open(job['config_path'], 'r') as f:
-    #     config = yaml.safe_load(f)
-
     os.chdir(os.path.dirname(job['script_path']))
 
-    # config 파일의 경로 업데이트 (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
-    config['data']['data_dir'] = os.path.join(project_root, 'data')
-    config['data']['train_dir'] = os.path.join(project_root, 'data', 'train')
-    config['data']['train_info_file'] = os.path.join(project_root, 'data', 'train.csv')
-    config['data']['test_dir'] = os.path.join(project_root, 'data', 'test')
-    config['data']['test_info_file'] = os.path.join(project_root, 'data', 'test.csv')
-    config['data']['augmented_dir'] = os.path.join(project_root, 'data', 'augmented.csv')
+    # 기본적으로 dataset이 지정된 폴더명
+    dataset_folder = 'dataset'
+
+    # config data 파일의 경로 업데이트 
+    config[dataset_folder]['data_dir'] = os.path.join(data_root, dataset_folder)
+    config[dataset_folder]['train_dir'] = os.path.join(data_root, dataset_folder, 'train')
+    config[dataset_folder]['train_info_file'] = os.path.join(data_root, dataset_folder, 'train.csv')
+    config[dataset_folder]['test_dir'] = os.path.join(data_root, dataset_folder, 'test')
+    config[dataset_folder]['test_info_file'] = os.path.join(data_root, dataset_folder, 'test.csv')
+    config[dataset_folder]['augmented_dir'] = os.path.join(data_root, dataset_folder, 'augmented.csv')
 
     # 파일 존재 여부 확인
     for key in ['train_info_file', 'test_info_file']:
-        if not os.path.exists(config['data'][key]):
-            logger.error(f"{key} not found: {config['data'][key]}")
+        if not os.path.exists(config[dataset_folder][key]):
+            logger.error(f"{key} not found: {config[dataset_folder][key]}")
             release_gpu(r, gpu_id)
             return False
         
     # train_file과 test_file 경로 설정 (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
-    train_file = os.path.join(project_root, 'data', 'train.csv')
-    test_file = os.path.join(project_root, 'data', 'test.csv')
-    aug_file = os.path.join(project_root, 'data', 'augmented.csv')
+    train_file = os.path.join(data_root, dataset_folder, 'train.csv')
+    test_file = os.path.join(data_root, dataset_folder, 'test.csv')
+    aug_file = os.path.join(data_root, dataset_folder, 'augmented.csv')
 
     logger.info(f"Train file path: {train_file}")
     logger.info(f"Test file path: {test_file}")
@@ -154,43 +161,11 @@ def run_job(job, r, channel, gpu_id):
         logger.error(f"Train file ({train_file}) or test file ({test_file}) not found")
         release_gpu(r, gpu_id)
         return False
-    
-    # 자동 augmentation 진행
-    # if not os.path.exists(aug_file):
-    #     logger.info(f"Augmented file ({aug_file}) not found. Sending job to augmentation queue")
-    #     try:
-    #         # 전송
-    #         channel.basic_publish(
-    #             exchange='',
-    #             routing_key=AUGMENTATION_QUEUE,
-    #             body=json.dumps({
-    #                 'config_path': job['config_path'],
-    #                 'script_path': job['script_path'],
-    #                 'data_path': job['data_path'],
-    #                 'aug_path': job['aug_path'],
-    #                 'train_csv_path': train_file,
-    #                 'test_csv_path': test_file
-    #             }),
-    #             properties=pika.BasicProperties(delivery_mode=2,)
-    #         )
-    #         release_gpu(r, gpu_id)
-    #     except json.JSONDecodeError as je:
-    #         logger.error(f"JSON encoding error: {je}")
-    #         release_gpu(r, gpu_id)
-    #         return False
-    #     except pika.exceptions.AMQPError as ae:
-    #         logger.error(f"AMQP error when sending message: {ae}")
-    #         release_gpu(r, gpu_id)
-    #         return False
-    #     except Exception as e:
-    #         logger.error(f"Unexpected error when sending message: {e}")
-    #         release_gpu(r, gpu_id)
-    #         return False
 
     # (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
-    config['data']['train_info_file'] = os.path.join('data', 'train.csv')
-    config['data']['test_info_file'] = os.path.join('data', 'test.csv')
-    config['data']['augmented_info_file'] = os.path.join('data', 'augmented.csv')
+    config[dataset_folder]['train_info_file'] = os.path.join(dataset_folder, 'train.csv')
+    config[dataset_folder]['test_info_file'] = os.path.join(dataset_folder, 'test.csv')
+    config[dataset_folder]['augmented_info_file'] = os.path.join(dataset_folder, 'augmented.csv')
 
     temp_config_path = f"temp_config_{job['user']}_{job['model_name']}.yaml"
 
@@ -199,15 +174,15 @@ def run_job(job, r, channel, gpu_id):
         yaml.dump(config, temp_file)
 
     logger.info(f"Current working directory: {os.getcwd()}")
-    logger.info(f"Actual train file path: {os.path.abspath(config['data']['train_info_file'])}")
-    logger.info(f"Augmented file path: {os.path.abspath(config['data']['augmented_info_file'])}")
+    logger.info(f"Actual train file path: {os.path.abspath(config[dataset_folder]['train_info_file'])}")
+    logger.info(f"Augmented file path: {os.path.abspath(config[dataset_folder]['augmented_info_file'])}")
 
     mode = config.get('mode', 'train')
 
     command = [
         sys.executable,
         os.path.basename(job['script_path']),
-        'config_path', os.path.relpath(config_dir, main_script_dir),
+        'config_path', config_dir,
         '--mode', mode,
         '--model_name', job['model_name'],
         '--learning_rate', str(job['learning_rate'])

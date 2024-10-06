@@ -19,6 +19,9 @@ python producer.py --config_path path/to/your/config.yaml --script_path path/to/
 # GPU 서버에서 할때의 경로 복붙해서 쓰면 됩니다
 --> python src/producer.py --config_path /data/ephemeral/home/level1-imageclassification-cv-24/configs --script_path /data/ephemeral/home/level1-imageclassification-cv-24/main.py --data_path C:\Users\User\Desktop\AIBoostcamp\level1-imageclassification-cv-24\data
 
+# 만약 config 내부에 model_name 별로 폴더가 있는 경우 --model_name 추가해서 경로 보내주기
+--> python src/producer.py --config_path /data/ephemeral/home/level1-imageclassification-cv-24/configs --script_path /data/ephemeral/home/level1-imageclassification-cv-24/main.py --data_path C:\Users\User\Desktop\AIBoostcamp\level1-imageclassification-cv-24\data --model_name faster_rcnn
+
 # Error Log
 1.  not matching erlang cookie
     - check your C\Users\Yourusername\erlang.cookie file
