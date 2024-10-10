@@ -97,45 +97,35 @@ def submit_job(channel, job_data):
 
 # main
 def main():
+    print("Script is starting...")
+    print("Python version:", sys.version)
+    print("Command line arguments:", sys.argv)
+    
     parser = argparse.ArgumentParser(description='Submit a training job to the queue')
-    parser.add_argument('--config_path', type=str, required=True, help='Path to the YAML config file')
+    parser.add_argument('--config_path', type=str, required=True, help='Path to the config file')
+    parser.add_argument('--work-dir', type=str, required=True, help='Work directory')
     parser.add_argument('--script_path', type=str, required=True, help='Path to the training script')
-    parser.add_argument('--data_path', type=str, required=True, help='Path to the data directory')
-    # parser.add_argument('--aug_path', type=str, required=True, help='Path to the aug directory')
-    parser.add_argument('--model_name', type=str, help='Model name to override config')
-    parser.add_argument('--manual_model_yn', type=str, help='If model selected by user not config')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use')
     parser.add_argument('script_args', nargs=argparse.REMAINDER, help='Additional arguments for the script')
+
     args = parser.parse_args()
+    print("Parsed arguments:", args)
 
     try:
         connection, channel = connect_to_rabbitmq()
 
-        config = get_config(args.config_path)
-        model_name, learning_rate = extract_info(config)
-
-        # 직접 모델을 지정했는지 안했는지
-        manual_model_yn = 'N'
-
-        if args.model_name:
-            model_name = args.model_name
-            # 직접 지정한 model 명인지 아닌지
-            manual_model_yn = 'Y'
-
-
-        script_args = args.script_args
-        if args.model_name and '--model_name' not in script_args:
-            script_args = ['--model_name', args.model_name] + script_args
+        # config = get_config(args.config_path)
+        # model_name, learning_rate = extract_info(config)
 
         job = {
             'user': USER_NAME,
-            'script_path': args.script_path,
             'config_path': args.config_path,
-            'data_path': args.data_path,
-            # 'aug_path': args.aug_path,
-            'model_name': model_name,
-            'learning_rate': learning_rate,
-            'manual_model_yn': manual_model_yn,
-            'script_args': script_args
+            'work_dir': args.work_dir,
+            'seed': args.seed,
+            'device': args.device,
+            'script_path': args.script_path,
+            'script_args': args.script_args
         }
 
         compressed_message = zlib.compress(json.dumps(job).encode())

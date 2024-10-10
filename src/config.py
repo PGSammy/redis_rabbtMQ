@@ -19,6 +19,9 @@ REDIS_PORT: int = int(os.getenv('REDIS_PORT', 6379))
 REDIS_DB = int(os.getenv('REDIS_DB', 0))
 REDIS_PASSWORD: str = os.getenv('REDIS_PASSWORD', '')
 
+# 여기다가 각자 프로젝트 메인 경로 지정
+MAIN_PROJECT_ROOT: str = os.getenv('MAIN_PROJECT_ROOT', r"C:\Users\User\Desktop\AIBoostcamp\level2-objectdetection-cv-24")
+
 # 사용자 이름 설정
 USER_NAME: str = os.getenv('USER_NAME', 'default_user')
 
@@ -40,6 +43,11 @@ REDIS_CONFIG: Dict[str, any] = {
     'PORT': REDIS_PORT,
     'DB': REDIS_DB,
     'PASSWORD': REDIS_PASSWORD
+}
+
+# 프로젝트 메인 경로 지정하기 (./mmdetection 등과 같이 .에 대한 상대경로를 지정해줄 수 있습니다)
+PROJECT_CONFIG: Dict[str, str] = {
+    'MAIN_PROJECT_ROOT': MAIN_PROJECT_ROOT
 }
 
 assert REDIS_PORT > 0, "REDIS_PORT must be a positive integer"

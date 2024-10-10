@@ -91,99 +91,23 @@ def release_gpu(r: redis.Redis, gpu_id: int):
     print(f"GPU {gpu_id} released.")
 
 def run_job(job, r, channel, gpu_id):
-    # gpu_id = get_available_gpu(r)
     env = os.environ.copy()
-    # env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
     env['PATH'] = f"{os.path.dirname(sys.executable)};{env['PATH']}"
-
-    # 지정해준 config_path와 data_path 사용
-    config_root = job['config_path']
-    data_root = job['data_path']
 
     # config.py에서 MAIN_PROJECT_ROOT를 설정한대로 진행
     # 만약 설정하지 않은 경우는 script_path에 대해서 os.path.dirname(job['script_path']) 로 메인 루트 조정 가능
     main_script_dir = PROJECT_CONFIG['MAIN_PROJECT_ROOT']
     script_dir = os.path.dirname(job['script_path'])
-
     working_dir = main_script_dir if main_script_dir else script_dir
-    logger.info(f"main_script_dir:{main_script_dir}, scirpt_dir:{script_dir}")
-    logger.info(f"Changing working directory to: {working_dir}")
     os.chdir(working_dir)
-
-    config = {}
-    config_dir = config_root
-    
-    for config_file in os.listdir(config_dir):
-        file_path = os.path.join(config_dir, config_file)
-        if config_file.endswith('.yaml'):
-            with open(file_path, 'r') as f:
-                config.update(yaml.safe_load(f))
-        elif config_file.endswith('.py'):
-            spec = importlib.util.spec_from_file_location(config_file[:-3], file_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            py_config = {k: v for k, v in module.__dict__.items() 
-                         if not k.startswith('__') and not callable(v) and not k.startswith('_')}
-            config.update(py_config)
-
-    # os.chdir(os.path.dirname(job['script_path']))
-
-    # 기본적으로 dataset이 지정된 폴더명
-    dataset_folder = 'data'
-
-    # config data 파일의 경로 업데이트 
-    config[dataset_folder]['data_dir'] = data_root
-    config[dataset_folder]['train_dir'] = os.path.join(data_root, 'train')
-    config[dataset_folder]['train_info_file'] = os.path.join(data_root, 'train.json')
-    config[dataset_folder]['test_dir'] = os.path.join(data_root, 'test')
-    config[dataset_folder]['test_info_file'] = os.path.join(data_root, 'test.json')
-    config[dataset_folder]['augmented_dir'] = os.path.join(data_root, 'augmented.csv')
-
-    # 파일 존재 여부 확인
-    for key in ['train_info_file', 'test_info_file']:
-        if not os.path.exists(config[dataset_folder][key]):
-            logger.error(f"{key} not found: {config[dataset_folder][key]}")
-            release_gpu(r, gpu_id)
-            return False
-        
-    # train_file과 test_file 경로 설정 (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
-    train_file = os.path.join(data_root, 'train.json')
-    test_file = os.path.join(data_root, 'test.json')
-    aug_file = os.path.join(data_root, 'augmented.csv')
-
-    logger.info(f"Train file path: {train_file}")
-    logger.info(f"Test file path: {test_file}")
-    logger.info(f"Aug file path: {aug_file}")
-
-    if not os.path.exists(train_file) or not os.path.exists(test_file):
-        logger.error(f"Train file ({train_file}) or test file ({test_file}) not found")
-        release_gpu(r, gpu_id)
-        return False
-
-    # (여기도 project_root는 프로젝트의 최상위 폴더임. 그 밑에 data train, test가 있는 폴더랑 파일명 지정하기)
-    config[dataset_folder]['train_info_file'] = os.path.join(data_root, 'train.json')
-    config[dataset_folder]['test_info_file'] = os.path.join(data_root, 'test.json')
-    config[dataset_folder]['augmented_info_file'] = os.path.join(data_root, 'augmented.csv')
-
-    temp_config_path = f"temp_config_{job['user']}_{job['model_name']}.yaml"
-
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
-        temp_config_path = temp_file.name
-        yaml.dump(config, temp_file)
-
-    logger.info(f"Current working directory: {os.getcwd()}")
-    logger.info(f"Actual train file path: {os.path.abspath(config[dataset_folder]['train_info_file'])}")
-    logger.info(f"Augmented file path: {os.path.abspath(config[dataset_folder]['augmented_info_file'])}")
-
-    mode = config.get('mode', 'train')
-
+   
     command = [
         sys.executable,
         job['script_path'],
-        'config_path', config_dir,
-        '--mode', mode,
-        '--model_name', job['model_name'],
-        '--learning_rate', str(job['learning_rate'])
+        job['config_path'],
+        '--work-dir', job['work_dir'],
+        '--seed', str(job['seed']),
+        '--device', job['device']
     ]
 
     if 'script_args' in job and job['script_args']:
@@ -194,13 +118,11 @@ def run_job(job, r, channel, gpu_id):
     env['PYTHONPATH'] = f"{working_dir}:{env.get('PYTHONPATH', '')}"
 
     try:
-        # os.chdir(os.path.dirname(os.path.dirname(job['config_path'])))
-
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True, env=env)
 
         stdout, stderr = process.communicate()
 
-        job_key = f"job_result:{job['user']}:{job['model_name']}"
+        job_key = f"job_result:{job['user']}"
 
         def signal_handler(signum, frame):
             if process:
@@ -220,9 +142,6 @@ def run_job(job, r, channel, gpu_id):
         else:
             logger.error(f"\nJob failed for user {job['user']}")
             logger.error(f"\nJob Error: {stderr}, out msg: {stdout}")
-            logger.info(f"Project root: {job['data_path']}")
-            logger.info(f"Train file path: {train_file}")
-            logger.info(f"Test file path: {test_file}")
             return False
     except Exception as e:
         logger.error(f"\nError during job execution: {str(e)}")
@@ -318,31 +237,6 @@ def process_output(line, job_key, r):
         for msg in messages:
             print(msg)
             logger.inf(msg)
-
-        # 기록용 남겨놓기
-        # log_message = f" Train Loss: {train_loss:.4f}, Train Metric: {train_metric:.4f}"
-        # print(log_message)
-        # logger.info(log_message)
-        
-        # log_message = f" Val Loss: {val_loss:.4f}, Val Metric: {val_metric:.4f}"
-        # print(log_message)
-        # logger.info(log_message)
-        
-        # log_message = f" Train Class Losses: {matches['class_loss_pattern'].group(1)}"
-        # print(log_message)
-        # logger.info(log_message)
-        
-        # log_message = f" Train Class Metric: {matches['class_metric_pattern'].group(1)}"
-        # print(log_message)
-        # logger.info(log_message)
-        
-        # log_message = f" Val Class Losses: {matches['val_class_loss_pattern'].group(1)}"
-        # print(log_message)
-        # logger.info(log_message)
-        
-        # log_message = f" Val Class Metric: {matches['val_class_metric_pattern'].group(1)}"
-        # print(log_message)
-        # logger.info(log_message)
 
 def process_message(message, channel):
     try:

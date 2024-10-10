@@ -15,6 +15,9 @@ python producer.py --config_path path/to/your/config.yaml --script_path path/to/
 
 # 로컬에서 돌릴때는 자기 경로 찾아서 넣기
 --> python C:\Users\User\Desktop\AIBoostcamp\redis_rabbtMQ\src\producer.py --config_path C:\Users\User\Desktop\AIBoostcamp\level1-imageclassification-cv-24\configs --script_path C:\Users\User\Desktop\AIBoostcamp\level1-imageclassification-cv-24\main.py --data_path C:\Users\User\Desktop\AIBoostcamp\level1-imageclassification-cv-24\data
+--> python C:\Users\User\Desktop\AIBoostcamp\redis_rabbtMQ\src\producer.py --config_path C:\Users\User\Desktop\AIBoostcamp\level2-objectdetection-cv-24\mmdetection\configs\cascade_rcnn --script_path C:\Users\User\Desktop\AIBoostcamp\level2-objectdetection-cv-24\mmdetection\train.py --data_path C:\Users\User\Desktop\AIBoostcamp\level2-objectdetection-cv-24\dataset
+--> python C:\Users\User\Desktop\AIBoostcamp\redis_rabbtMQ\src\det_producer.py --config_path "C:\Users\User\Desktop\AIBoostcamp\level2-objectdetection-cv-24\mmdetection\configs\custom_configs\haegang_test.py" --work-dir "C:\Users\User\Desktop\AIBoostcamp\level2-objectdetection-cv-24\mmdetection\work_dirs\codino_swin_lsj" --script_path "C:\Users\User\Desktop\AIBoostcamp\level2-objectdetection-cv-24\mmdetection\train.py" --seed 42 --device cuda
+(새로운 producer.py, train.py를 --args로 받는 경우 사용)
 
 # GPU 서버에서 할때의 경로 복붙해서 쓰면 됩니다
 --> python src/producer.py --config_path /data/ephemeral/home/level1-imageclassification-cv-24/configs --script_path /data/ephemeral/home/level1-imageclassification-cv-24/main.py --data_path /data/ephemeral/home/level1-imageclassification-cv-24/data
